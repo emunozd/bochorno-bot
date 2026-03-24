@@ -18,7 +18,7 @@ import pytest
 from src.data.weather_data import (
     _make_weather_slug,
     _parse_outcome_value,
-    _detect_unit_from_market,
+    _detect_unit_from_event,
 )
 
 
@@ -49,62 +49,64 @@ def test_slug_december():
 # ── Outcome value parsing ───────────────────────────────────────────────────
 
 def test_parse_simple_celsius():
-    assert _parse_outcome_value("26°C", "C") == 26
+    assert _parse_outcome_value("26°C") == 26
 
 def test_parse_simple_fahrenheit():
-    assert _parse_outcome_value("72°F", "F") == 72
+    assert _parse_outcome_value("72°F") == 72
 
 def test_parse_or_higher():
-    assert _parse_outcome_value("30°C or higher", "C") == 30
+    assert _parse_outcome_value("30°C or higher") == 30
 
 def test_parse_or_lower():
-    assert _parse_outcome_value("21°C or lower", "C") == 21
+    assert _parse_outcome_value("21°C or lower") == 21
 
 def test_parse_or_below():
-    assert _parse_outcome_value("5°C or below", "C") == 5
+    assert _parse_outcome_value("5°C or below") == 5
 
 def test_parse_no_unit():
-    assert _parse_outcome_value("26", "C") == 26
+    assert _parse_outcome_value("26") == 26
 
 def test_parse_negative_temp():
-    assert _parse_outcome_value("-5°C", "C") == -5
+    assert _parse_outcome_value("-5°C") == -5
 
 def test_parse_fahrenheit_high():
-    assert _parse_outcome_value("100°F or higher", "F") == 100
+    assert _parse_outcome_value("100°F or higher") == 100
 
 def test_parse_none_on_garbage():
-    result = _parse_outcome_value("No data", "C")
+    result = _parse_outcome_value("No data")
     assert result is None
 
 
 # ── Unit detection ──────────────────────────────────────────────────────────
 
 def test_detect_celsius():
-    market = {"question": "Highest temperature in Seoul on March 25? 11°C"}
-    assert _detect_unit_from_market(market) == "C"
+    event = {"markets": [{"question": "11°C"}], "question": "Highest temperature in Seoul on March 25?"}
+    assert _detect_unit_from_event(event, {}) == "C"
 
 def test_detect_fahrenheit():
-    market = {"question": "Highest temperature in Atlanta on March 25? 72°F"}
-    assert _detect_unit_from_market(market) == "F"
+    event = {"markets": [{"question": "72°F"}], "question": "Highest temperature in Atlanta on March 25?"}
+    assert _detect_unit_from_event(event, {}) == "F"
 
 def test_detect_fahrenheit_word():
-    market = {"question": "Will temp exceed 70 Fahrenheit?"}
-    assert _detect_unit_from_market(market) == "F"
+    event = {"markets": [], "question": "Will temp exceed 70 Fahrenheit?"}
+    assert _detect_unit_from_event(event, {}) == "F"
 
 def test_detect_celsius_word():
-    market = {"question": "Will temp be above 20 Celsius?"}
-    assert _detect_unit_from_market(market) == "C"
+    event = {"markets": [], "question": "Will temp be above 20 Celsius?"}
+    assert _detect_unit_from_event(event, {}) == "C"
 
 def test_detect_none_on_ambiguous():
-    market = {"question": "What will the temperature be?"}
-    assert _detect_unit_from_market(market) is None
+    event = {"markets": [], "question": "What will the temperature be?"}
+    # Falls back to config
+    assert _detect_unit_from_event(event, {"temp_unit": "C"}) == "C"
 
 def test_detect_from_description():
-    market = {
+    event = {
+        "markets": [],
         "question": "Highest temperature tomorrow?",
         "description": "Resolution in degrees Fahrenheit."
     }
-    assert _detect_unit_from_market(market) == "F"
+    assert _detect_unit_from_event(event, {}) == "F"
 
 
 # ── Full outcome extraction simulation ─────────────────────────────────────

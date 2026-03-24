@@ -200,10 +200,13 @@ def detect_opportunity(
       - Market price available
     """
     from src.config import WCS_MIN
+    from src.data.weather_data import market_is_open
 
     if wcs_data.get("blocked"):
         return None
     if wcs_data.get("score", 0) < WCS_MIN:
+        return None
+    if not market_is_open(city_key):
         return None
 
     best_outcome = tps_data.get("best_outcome")
@@ -234,4 +237,6 @@ def detect_opportunity(
         "T_std":       tps_data.get("T_std"),
         "wcs":         wcs_data.get("score"),
         "token_id":    cfg.get("token_ids", {}).get(best_outcome, ""),
+        "end_date":    cfg.get("end_date", ""),
+        "target_date": cfg.get("target_date", ""),
     }
