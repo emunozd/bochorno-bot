@@ -14,7 +14,7 @@ from rich.table import Table
 from rich import box
 from rich.rule import Rule
 from rich.columns import Columns
-from rich.group import Group
+from rich.console import Group
 
 from src.config import ET, WATCH_CITIES
 from src.signals.stats import edge_verdict
