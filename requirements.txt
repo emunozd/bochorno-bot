@@ -1,0 +1,22 @@
+# Core
+requests>=2.31.0
+rich>=13.7.0
+
+# Math (outcome probability distributions)
+scipy>=1.12.0
+numpy>=1.26.0
+
+# LLM — OpenAI-compatible client (covers local servers, Groq, Together, OpenAI)
+openai>=1.30.0
+
+# LLM — Anthropic (optional, only needed if LLM_BACKEND=anthropic)
+# anthropic>=0.25.0
+
+# Telegram bot
+python-telegram-bot>=21.0.0
+
+# Polymarket CLOB — required for live trading
+py-clob-client>=0.17.0
+
+# Testing
+pytest>=8.0.0
