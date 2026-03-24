@@ -54,12 +54,18 @@ def fetch_ensemble(city_key: str) -> Optional[dict]:
         "timezone":      cfg["timezone"],
     }
 
-    try:
-        r = requests.get(OPEN_METEO_FORECAST, params=params, timeout=10)
-        r.raise_for_status()
-        data = r.json()
-    except Exception as e:
-        log.warning(f"Open-Meteo forecast failed for {city_key}: {e}")
+    for attempt in range(3):
+        try:
+            r = requests.get(OPEN_METEO_FORECAST, params=params, timeout=15)
+            r.raise_for_status()
+            data = r.json()
+            break
+        except Exception as e:
+            if attempt == 2:
+                log.warning(f"Open-Meteo forecast failed for {city_key}: {e}")
+                return None
+            log.debug(f"Open-Meteo retry {attempt+1} for {city_key}: {e}")
+    else:
         return None
 
     daily  = data.get("daily", {})
