@@ -60,7 +60,7 @@ def validate_weather_pip(
     now = time.time()
     if now - _last_call.get(city_key, 0) < _LLM_THROTTLE_SECS:
         return {"valid": True, "adjusted_pip": pip, "confidence": "low",
-                "reason": "throttled — using ensemble PIP"}
+                "reason": ""}
     _last_call[city_key] = now
 
     # Build model summary string (keep short)
