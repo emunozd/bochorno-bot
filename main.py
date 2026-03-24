@@ -24,6 +24,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logging.getLogger("bochorno-bot.telegram").setLevel(logging.DEBUG)
+logging.getLogger("bochorno-bot.llm").setLevel(logging.WARNING)
 
 from src.config import (
     WATCH_CITIES, POLY_PK, POLY_FUNDER, CAPITAL_INITIAL,
@@ -33,7 +34,7 @@ from src.config import (
 from src.data import database as DB
 from src.data.weather_data import (
     fetch_ensemble, fetch_current_obs, fetch_climate_history,
-    discover_weather_markets, fetch_poly_prices
+    discover_weather_markets, fetch_poly_prices, market_is_open
 )
 from src.signals.weather_indicators import (
     compute_ensemble_stats, weights_from_mae, compute_climate_percentiles,
@@ -88,6 +89,8 @@ state = {
 
     # Per-city forecast cache
     "forecasts":     {c: {} for c in WATCH_CITIES},
+    "obs_temps":     {c: None for c in WATCH_CITIES},   # current observed T in °C
+    "prev_ensemble": {c: None for c in WATCH_CITIES},   # previous ensemble mean °C
 
     # Positions and trades
     "positions":     {},
@@ -135,6 +138,19 @@ def do_fetch_forecasts():
                     state["last_update"] = datetime.now(ET).strftime("%H:%M:%S ET")
     finally:
         with lock: state["fetching"].discard("forecasts")
+
+
+def do_fetch_obs():
+    """Fetch current observed temperature for each city."""
+    with lock: state["fetching"].add("obs")
+    try:
+        for city_key in WATCH_CITIES:
+            t = fetch_current_obs(city_key)
+            if t is not None:
+                with lock:
+                    state["obs_temps"][city_key] = t
+    finally:
+        with lock: state["fetching"].discard("obs")
 
 
 def do_fetch_prices():
@@ -194,17 +210,42 @@ def do_run_signals():
             # Compute ensemble stats (in °C for internal math)
             ensemble = compute_ensemble_stats(model_temps, weights)
 
-            # WCS
+            # Compute real horizon: minutes until end_date
+            horizon_hours = 12.0  # fallback
+            end_date = cfg.get("end_date", "")
+            if end_date:
+                try:
+                    from datetime import timezone
+                    end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+                    mins_left = (end_dt - datetime.now(end_dt.tzinfo)).total_seconds() / 60
+                    horizon_hours = max(0.0, mins_left / 60.0)
+                except Exception:
+                    pass
+
+            obs_temp_c      = state["obs_temps"].get(city_key)
+            prev_ens_mean   = state["prev_ensemble"].get(city_key)
+
+            # WCS — now with real horizon, obs consistency, drift detection
             wcs_data = compute_wcs(
                 model_temps, weights, clim_stats,
-                horizon_hours=12,
+                horizon_hours=horizon_hours,
+                prev_ensemble_mean=prev_ens_mean,
+                obs_temp_c=obs_temp_c,
             )
 
-            # TPS — passes model temps in °C, handles conversion internally
+            # TPS — now with obs anchor and climatological outlier clip
             tps_data = compute_tps(
                 model_temps, weights, clim_stats,
                 outcomes, mkt_prices, unit,
+                obs_temp_c=obs_temp_c,
+                horizon_hours=horizon_hours,
             )
+
+            # Save ensemble mean for drift detection next cycle
+            new_ens_mean = ensemble.get("T_mean")
+            if new_ens_mean is not None:
+                with lock:
+                    state["prev_ensemble"][city_key] = new_ens_mean
 
             # PIP raw
             pip_raw = tps_data.get("best_prob") or 0.5
@@ -252,6 +293,8 @@ def do_run_signals():
                 "all_probs":    tps_data.get("all_probs", {}),
                 "opportunity":  opp,
                 "model_temps":  model_temps_display,
+                "obs_temp_c":   obs_temp_c,
+                "horizon_h":    round(horizon_hours, 1),
             }
 
             with lock:
@@ -355,6 +398,7 @@ def startup():
     threads = [
         threading.Thread(target=_run(do_fetch_forecasts), daemon=True),
         threading.Thread(target=_run(do_fetch_prices), daemon=True),
+        threading.Thread(target=_run(do_fetch_obs), daemon=True),
     ]
     for t in threads: t.start()
     for t in threads: t.join(timeout=45)
@@ -372,6 +416,7 @@ def main():
 
     _last_forecast_min  = -1
     _last_price_ts      = 0.0
+    _last_obs_ts        = 0.0
     _last_sig_min       = -1
     _last_market_h      = -1
 
@@ -388,6 +433,11 @@ def main():
             if time.time() - _last_price_ts >= 30:
                 _last_price_ts = time.time()
                 bg(do_fetch_prices)
+
+            # Current observed temperature: every 15 minutes
+            if time.time() - _last_obs_ts >= 900:
+                _last_obs_ts = time.time()
+                bg(do_fetch_obs)
 
             # NWP forecasts: every 30 minutes (models update 2-4x/day)
             if now.minute in (0, 30) and now.minute != _last_forecast_min:
