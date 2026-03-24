@@ -74,35 +74,57 @@ def city_panel(city_key: str, state: dict) -> Panel:
     pos    = state["positions"].get(city_key)
     pp     = state["poly_prices"].get(city_key, {})
 
-    wcs       = sig.get("wcs")
-    wcs_zone  = sig.get("wcs_zone", "—")
-    T_pred    = sig.get("T_predicted")
-    T_std     = sig.get("T_std")
-    best_out  = sig.get("best_outcome")
-    best_prob = sig.get("best_prob")
-    mkt_price = sig.get("mkt_price")
-    edge      = sig.get("edge")
-    opp       = sig.get("opportunity")
-    all_probs = sig.get("all_probs", {})
+    wcs         = sig.get("wcs")
+    wcs_zone    = sig.get("wcs_zone", "—")
+    T_pred      = sig.get("T_predicted")
+    T_std       = sig.get("T_std")
+    best_out    = sig.get("best_outcome")
+    best_prob   = sig.get("best_prob")
+    mkt_price   = sig.get("mkt_price")
+    edge        = sig.get("edge")
+    opp         = sig.get("opportunity")
+    all_probs   = sig.get("all_probs", {})
     model_temps = sig.get("model_temps", {})
-    unit      = cfg.get("temp_unit", "C")
-    pip_val   = state["pip"].get(city_key)
-    pip_valid = state["pip_validated"].get(city_key, {})
-    blocked   = sig.get("wcs_blocked", False)
+    unit        = cfg.get("temp_unit", "C")
+    pip_val     = state["pip"].get(city_key)
+    pip_valid   = state["pip_validated"].get(city_key, {})
+    blocked     = sig.get("wcs_blocked", False)
+    end_date    = cfg.get("end_date", "")
+    target_date = cfg.get("target_date", "")
 
     border = "cyan"
     if pos:    border = "green"
     elif opp:  border = "cyan"
     elif blocked: border = "red"
 
+    # Format end_date
+    end_str = ""
+    if end_date:
+        try:
+            from datetime import timezone
+            end_dt   = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+            mins_left = (end_dt - datetime.now(end_dt.tzinfo)).total_seconds() / 60
+            if mins_left > 0:
+                h_left = int(mins_left // 60)
+                m_left = int(mins_left % 60)
+                end_str = f"  resolves in {h_left}h{m_left:02d}m"
+            else:
+                end_str = "  RESOLVED"
+        except Exception:
+            pass
+
     # Header
     hdr = Text()
     hdr.append(f"{city_key}  ", style=f"bold {border}")
     hdr.append(f"{cfg['name']}, {cfg['country']}  ", style="dim")
+    if target_date:
+        hdr.append(f"{target_date}  ", style="dim")
     if T_pred is not None:
         hdr.append(f"T̂ {T_pred:.1f}°{unit}", style="bold white")
     if T_std is not None:
         hdr.append(f"  ±{T_std:.1f}", style="dim")
+    if end_str:
+        hdr.append(end_str, style="yellow" if "RESOLVED" not in end_str else "red")
 
     # Model temps row
     mt = Table.grid(padding=(0, 2))
