@@ -6,6 +6,11 @@ services:
       dockerfile: Dockerfile
     container_name: bochorno-bot
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512m
     env_file:
       - .env
     environment:
