@@ -52,10 +52,12 @@ def _build_client():
         return None
     base = LLM_BASE_URL or "http://localhost:11434/v1"
     key  = LLM_API_KEY if LLM_API_KEY and LLM_API_KEY != "none" else "sk-local"
-    return _OpenAI(base_url=base, api_key=key)
+    # 60s timeout — large local models (35B+) can be slow to respond
+    return _OpenAI(base_url=base, api_key=key, timeout=60.0)
 
 
 _client = _build_client()
+_last_ok: bool = False   # updated on each successful llm_chat call
 
 
 def llm_chat(prompt: str, max_tokens: int = 500) -> Optional[str]:
@@ -63,7 +65,9 @@ def llm_chat(prompt: str, max_tokens: int = 500) -> Optional[str]:
     Send a prompt to the configured LLM and return the response text.
     Returns None on any failure — callers must handle the None case gracefully.
     """
+    global _last_ok
     if _client is None:
+        _last_ok = False
         return None
     try:
         if LLM_BACKEND == "anthropic":
@@ -72,6 +76,7 @@ def llm_chat(prompt: str, max_tokens: int = 500) -> Optional[str]:
                 max_tokens=max_tokens,
                 messages=[{"role": "user", "content": prompt}],
             )
+            _last_ok = True
             return resp.content[0].text.strip()
         else:
             resp = _client.chat.completions.create(
@@ -80,10 +85,34 @@ def llm_chat(prompt: str, max_tokens: int = 500) -> Optional[str]:
                 temperature=0.1,
                 messages=[{"role": "user", "content": prompt}],
             )
+            _last_ok = True
             return resp.choices[0].message.content.strip()
-    except Exception:
+    except Exception as e:
+        _last_ok = False
+        import logging
+        logging.getLogger("bochorno-bot.llm").warning(f"LLM request failed: {e}")
         return None
 
 
 def is_available() -> bool:
-    return _client is not None
+    """
+    Returns True if the client is configured AND the last request succeeded.
+    On first call (no requests yet), attempts a lightweight ping.
+    """
+    global _last_ok
+    if _client is None:
+        return False
+    if _last_ok:
+        return True
+    # Attempt a minimal ping to verify connectivity
+    try:
+        if LLM_BACKEND == "anthropic":
+            return True   # Anthropic validates on first real call
+        else:
+            _client.models.list()
+            _last_ok = True
+            return True
+    except Exception as e:
+        import logging
+        logging.getLogger("bochorno-bot.llm").debug(f"LLM ping failed: {e}")
+        return False
