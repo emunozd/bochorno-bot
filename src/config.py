@@ -96,6 +96,7 @@ NWP_FALLBACK_WEIGHTS = {
 # ── Signal thresholds ──────────────────────────────────────────────────────
 WCS_MIN        = float(os.environ.get("WCS_MIN",    "65"))   # Weather Confidence Score
 EDGE_MIN       = float(os.environ.get("EDGE_MIN",   "0.08")) # min PIP - market_price
+MKT_PRICE_MIN  = float(os.environ.get("MKT_PRICE_MIN", "0.02")) # skip illiquid outcomes below this price
 SIGMA_MAX      = float(os.environ.get("SIGMA_MAX",  "3.0"))  # block if ensemble spread > this (°C/°F)
 
 # ── Risk management ────────────────────────────────────────────────────────

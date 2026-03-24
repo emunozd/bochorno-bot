@@ -199,7 +199,7 @@ def detect_opportunity(
       - Edge >= EDGE_MIN after LLM validation
       - Market price available
     """
-    from src.config import WCS_MIN
+    from src.config import WCS_MIN, MKT_PRICE_MIN
     from src.data.weather_data import market_is_open
 
     if wcs_data.get("blocked"):
@@ -213,6 +213,11 @@ def detect_opportunity(
     mkt_price    = tps_data.get("mkt_price")
 
     if best_outcome is None or mkt_price is None:
+        return None
+
+    # Reject illiquid outcomes — price below 2 cents means no real market
+    if mkt_price < MKT_PRICE_MIN:
+        log.debug(f"{city_key}: mkt_price {mkt_price:.4f} too low — illiquid outcome, skipping")
         return None
 
     edge = round(pip_final - mkt_price, 4)
