@@ -411,17 +411,25 @@ async def cmd_trades(update: "Update", ctx: "ContextTypes.DEFAULT_TYPE") -> None
 
     lines = ["📋 Últimos trades\n"]
     for t in recent:
-        cfg  = WATCH_CITIES.get(t.get("city_key", ""), {})
-        unit = cfg.get("temp_unit", "C")
-        col  = "🟢" if (t.get("pnl") or 0) > 0 else "🔴"
+        cfg     = WATCH_CITIES.get(t.get("city_key", ""), {})
+        unit    = cfg.get("temp_unit", "C")
+        pnl     = t.get("pnl", 0) or 0
+        pnl_pct = t.get("pnl_pct", 0) or 0
+        col     = "🟢" if pnl > 0 else ("🔴" if pnl < 0 else "⚪")
+        entry   = t.get("entry_price", 0)
+        exit_p  = t.get("exit_price", 0)
+        reason  = t.get("reason", "?")
+        name    = cfg.get("name", t.get("city_key", "?"))
+        outcome = t.get("outcome_val", "?")
+        dur     = t.get("duration", "")
+        ts      = t.get("time", "")[:16].replace("T", " ")
         lines.append(
-            f"{col} {cfg.get('name', t.get('city_key','?'))} "
-            f"{t.get('outcome_val','?')}°{unit} "
-            f"— {_fmt_pnl(t.get('pnl', 0))} USDC "
-            f"({t.get('reason','?')})"
+            f"{col} {name} — {outcome}°{unit}\n"
+            f"   ${entry:.3f} → ${exit_p:.3f}  |  {_fmt_pnl(pnl)} USDC ({pnl_pct:+.1f}%)\n"
+            f"   {reason}  ·  {dur}  ·  {ts}"
         )
 
-    await update.message.reply_text("\n".join(lines))
+    await update.message.reply_text("\n\n".join(lines))
 
 
 @_require_auth
