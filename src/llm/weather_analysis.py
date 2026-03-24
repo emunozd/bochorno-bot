@@ -6,45 +6,22 @@ adapted with a meteorological prompt.
 """
 
 import json
+import time
 from typing import Optional
 
 from src.llm.client import llm_chat
 from src.config import LLM_MODEL, MODEL_CONF_CAPS
 
+# Throttle: one LLM call per city per N seconds — prevents hammering large local models
+_LLM_THROTTLE_SECS = 600   # 10 minutes
+_last_call: dict = {}       # {city_key: timestamp}
 
-_WEATHER_VALIDATION_PROMPT = """
-You are a meteorological prediction market analyst with expertise in short-range weather forecasting.
 
-City: {city_name} ({country})
-Date: {target_date}
-Ensemble T_max forecast: {T_predicted:.1f}°{unit}
-Ensemble spread (1-sigma): ±{T_std:.1f}°{unit}
-Number of NWP models: {n_models}
-Weather Confidence Score (WCS): {wcs:.1f}/100
-Outcome we are bidding YES on: {best_outcome}°{unit}
-Our probability estimate (PIP): {pip:.2%}
-Current Polymarket price for that outcome: {mkt_price:.2%}
-Edge: {edge:+.2%}
-
-Context from ensemble models: {model_summary}
-
-Question: Is our {pip:.0%} probability estimate for T_max = {best_outcome}°{unit} reasonable?
-
-Consider:
-- Typical forecast skill for this city and season
-- Whether {T_predicted:.1f}°{unit} with ±{T_std:.1f}°{unit} spread strongly supports outcome {best_outcome}
-- Base rate: for a bin of ±0.5°{unit} around a forecast, the correct bin resolves ~25-35% of the time under normal spread
-- Any known systematic biases for the region (e.g. marine influence, urban heat island)
-- Adjust our PIP by at most ±0.10
-
-Return ONLY valid JSON (no markdown, no extra text):
-{{"valid": true, "adjusted_pip": {pip:.3f}, "confidence": "medium", "reason": "one sentence"}}
-
-Rules:
-- adjusted_pip must be between 0.25 and 0.75
-- confidence: high | medium | low
-- If you are uncertain, set confidence to low and keep adjusted_pip close to our estimate
-"""
+_WEATHER_VALIDATION_PROMPT = """You are a weather prediction market analyst.
+{city_name} {target_date}: ensemble T_max={T_predicted:.1f}°{unit} ±{T_std:.1f}, models={model_summary}
+Bidding YES on {best_outcome}°{unit}. Our PIP={pip:.0%}, market={mkt_price:.0%}, edge={edge:+.0%}.
+Is PIP reasonable? Adjust ±0.10 max.
+Reply ONLY JSON: {{"valid":true,"adjusted_pip":{pip:.3f},"confidence":"medium","reason":"one sentence"}}"""
 
 
 def _model_conf_cap() -> float:
@@ -79,11 +56,18 @@ def validate_weather_pip(
     """
     edge = round(pip - mkt_price, 4)
 
-    # Build model summary string
-    model_summary = ", ".join(
-        f"{m.replace('_', '-')}: {t:.1f}°{unit}"
-        for m, t in model_temps.items()
-    ) or "unavailable"
+    # Throttle — skip if called too recently for this city
+    now = time.time()
+    if now - _last_call.get(city_key, 0) < _LLM_THROTTLE_SECS:
+        return {"valid": True, "adjusted_pip": pip, "confidence": "low",
+                "reason": "throttled — using ensemble PIP"}
+    _last_call[city_key] = now
+
+    # Build model summary string (keep short)
+    model_summary = " ".join(
+        f"{m.split('-')[0][:4]}:{t:.0f}"
+        for m, t in list(model_temps.items())[:4]
+    ) or "n/a"
 
     raw = llm_chat(_WEATHER_VALIDATION_PROMPT.format(
         city_name    = city_name,
