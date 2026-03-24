@@ -491,17 +491,30 @@ def fetch_poly_prices(
 ) -> Dict[int, float]:
     """
     Fetch current YES prices for all outcomes of a city.
+    One request per city (re-fetches the event slug) instead of one per outcome.
     Returns {outcome_val: price}.
     """
-    prices = {}
+    cfg  = WATCH_CITIES.get(city_key, {})
+    slug = cfg.get("poly_slug", "")
 
-    for outcome_val, token_id in token_ids.items():
-        if not token_id:
-            continue
+    # Strategy 1: re-fetch the event by slug — gets all outcome prices in one call
+    if slug:
+        try:
+            event = _fetch_event_by_slug(slug)
+            if event:
+                _, mkt_prices, _ = _extract_outcome_tokens(event, cfg)
+                if mkt_prices:
+                    log.debug(f"{city_key} prices refreshed via slug: {mkt_prices}")
+                    return mkt_prices
+        except Exception as e:
+            log.debug(f"{city_key} slug price fetch failed: {e}")
 
-        price = None
-
-        if poly_client:
+    # Strategy 2: CLOB mid-price per token (live trading mode)
+    if poly_client:
+        prices = {}
+        for outcome_val, token_id in token_ids.items():
+            if not token_id:
+                continue
             try:
                 buy_r  = requests.get(
                     "https://clob.polymarket.com/book",
@@ -516,31 +529,12 @@ def fetch_poly_prices(
                 buy_p  = float(buy_r.json().get("price", 0))
                 sell_p = float(sell_r.json().get("price", 0))
                 if buy_p > 0 and sell_p > 0:
-                    price = round((buy_p + sell_p) / 2, 3)
+                    prices[outcome_val] = round((buy_p + sell_p) / 2, 3)
                 elif buy_p > 0:
-                    price = buy_p
+                    prices[outcome_val] = buy_p
             except Exception:
                 pass
+        if prices:
+            return prices
 
-        if price is None:
-            try:
-                r = requests.get(
-                    f"{GAMMA_API}/markets",
-                    params={"clobTokenIds": token_id},
-                    timeout=5
-                )
-                data = r.json()
-                if data:
-                    mkt = data[0] if isinstance(data, list) else data
-                    raw = mkt.get("outcomePrices", [])
-                    if isinstance(raw, str):
-                        raw = json.loads(raw)
-                    if raw:
-                        price = float(raw[0])
-            except Exception:
-                pass
-
-        if price is not None:
-            prices[outcome_val] = round(price, 3)
-
-    return prices
+    return {}
