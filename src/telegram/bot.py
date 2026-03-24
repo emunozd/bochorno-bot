@@ -55,10 +55,17 @@ def _run_polling(token: str) -> None:
     import asyncio
     global _loop
 
+    # python-telegram-bot v21+ installs signal handlers inside run_polling(),
+    # which only works on the main thread. We avoid that by managing the
+    # application lifecycle manually: initialize → start_polling → start → sleep.
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    _loop = loop
+
     async def _main():
-        global _app, _loop
-        _loop = asyncio.get_running_loop()
-        _app  = ApplicationBuilder().token(token).build()
+        global _app
+        _app = ApplicationBuilder().token(token).build()
+
         for name, fn in [
             ("start",       cmd_start),
             ("vincular",    cmd_vincular),
@@ -75,6 +82,11 @@ def _run_polling(token: str) -> None:
         ]:
             _app.add_handler(CommandHandler(name, fn))
 
+        # Manual lifecycle — no signal handlers, safe from any thread
+        await _app.initialize()
+        await _app.updater.start_polling(drop_pending_updates=True)
+        await _app.start()
+
         await _app.bot.set_my_commands([
             BotCommand("positions",   "Posiciones abiertas"),
             BotCommand("signals",     "Señales climáticas activas"),
@@ -87,9 +99,17 @@ def _run_polling(token: str) -> None:
             BotCommand("help",        "Ayuda"),
         ])
 
-        await _app.run_polling(drop_pending_updates=True)
+        log.info("Telegram polling started.")
+        # Keep alive — daemon thread exits when main process does
+        while True:
+            await asyncio.sleep(60)
 
-    asyncio.run(_main())
+    try:
+        loop.run_until_complete(_main())
+    except Exception as e:
+        log.error(f"Telegram polling crashed: {e}")
+    finally:
+        loop.close()
 
 
 # ── Auth helpers ────────────────────────────────────────────────────────────
