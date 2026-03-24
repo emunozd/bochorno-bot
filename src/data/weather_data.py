@@ -367,12 +367,31 @@ def discover_weather_markets(watch_cities: dict) -> Dict[str, dict]:
         event     = None
         slug_used = ""
 
+        # Prefer tomorrow if today's market is already resolved or resolves soon.
+        # Polymarket temperature markets typically resolve at noon local time.
+        # We consider a market "done" if its end_date is in the past or within 30 min.
+        def _market_still_active(ev: dict) -> bool:
+            ed = _parse_end_date(ev)
+            if not ed:
+                return True  # unknown — assume active
+            try:
+                end_dt    = datetime.fromisoformat(ed.replace("Z", "+00:00"))
+                mins_left = (end_dt - datetime.now(end_dt.tzinfo)).total_seconds() / 60
+                return mins_left > 30
+            except Exception:
+                return True
+
         for dt in [now, tomorrow]:
-            slug  = _make_weather_slug(prefix, dt)
-            event = _fetch_event_by_slug(slug)
-            if event:
+            slug      = _make_weather_slug(prefix, dt)
+            candidate = _fetch_event_by_slug(slug)
+            if candidate and _market_still_active(candidate):
+                event     = candidate
                 slug_used = slug
                 break
+            elif candidate and event is None:
+                # Keep as fallback even if resolved — better than nothing
+                event     = candidate
+                slug_used = slug
 
         if not event:
             city_name_lower = cfg["name"].lower().replace(" ", "-")

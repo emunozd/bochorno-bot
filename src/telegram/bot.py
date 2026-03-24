@@ -48,12 +48,17 @@ def init(state: dict, lock: threading.Lock) -> None:
     log.info("Telegram thread started.")
 
 
+_loop: Optional[object] = None  # the running event loop — used by _send_sync
+
+
 def _run_polling(token: str) -> None:
     import asyncio
+    global _loop
 
     async def _main():
-        global _app
-        _app = ApplicationBuilder().token(token).build()
+        global _app, _loop
+        _loop = asyncio.get_running_loop()
+        _app  = ApplicationBuilder().token(token).build()
         for name, fn in [
             ("start",       cmd_start),
             ("vincular",    cmd_vincular),
@@ -502,18 +507,19 @@ def is_paused() -> bool:
 # ── Push alerts ─────────────────────────────────────────────────────────────
 
 def _send_sync(text: str) -> None:
-    if not HAS_TG or _app is None:
+    if not HAS_TG or _app is None or _loop is None:
         return
     chat_id = _get_owner()
     if not chat_id:
         return
-    def _push():
-        import asyncio
-        try:
-            asyncio.run(_app.bot.send_message(chat_id=chat_id, text=text))
-        except Exception as exc:
-            log.warning(f"Telegram push failed: {exc}")
-    threading.Thread(target=_push, daemon=True).start()
+    import asyncio
+    try:
+        asyncio.run_coroutine_threadsafe(
+            _app.bot.send_message(chat_id=chat_id, text=text),
+            _loop
+        )
+    except Exception as exc:
+        log.warning(f"Telegram push failed: {exc}")
 
 
 def alert_position_opened(city_key, outcome_val, unit,
