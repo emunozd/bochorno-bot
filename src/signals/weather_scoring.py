@@ -281,6 +281,7 @@ def detect_opportunity(
     wcs_data: Dict,
     tps_data: Dict,
     pip_final: float,
+    extra_state: Optional[Dict] = None,
 ) -> Optional[Dict]:
     """
     Return a trade signal dict if all entry conditions are met.
@@ -302,6 +303,17 @@ def detect_opportunity(
     if wcs_data.get("score", 0) < WCS_MIN:
         return None
     if not market_is_open(city_key):
+        return None
+
+    # Guard 1: market collapsed today (price fell below COLLAPSE_PRICE)
+    _es = extra_state or {}
+    if city_key in (_es.get("collapsed_today") or set()):
+        log.debug(f"{city_key}: market collapsed today — no entry")
+        return None
+
+    # Guard 2: already traded this city today (one entry per day)
+    if city_key in (_es.get("traded_today") or set()):
+        log.debug(f"{city_key}: already traded today — no re-entry")
         return None
 
     best_outcome = tps_data.get("best_outcome")

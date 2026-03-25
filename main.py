@@ -89,8 +89,10 @@ state = {
 
     # Per-city forecast cache
     "forecasts":     {c: {} for c in WATCH_CITIES},
-    "obs_temps":     {c: None for c in WATCH_CITIES},   # current observed T in °C
-    "prev_ensemble": {c: None for c in WATCH_CITIES},   # previous ensemble mean °C
+    "obs_temps":       {c: None for c in WATCH_CITIES},   # current observed T in °C
+    "prev_ensemble":   {c: None for c in WATCH_CITIES},   # previous ensemble mean °C
+    "collapsed_today": set(),   # cities whose market price collapsed (<3¢) today
+    "traded_today":    set(),   # cities that already had a closed position today
 
     # Positions and trades
     "positions":     {},
@@ -156,6 +158,7 @@ def do_fetch_obs():
 def do_fetch_prices():
     with lock: state["fetching"].add("prices")
     try:
+        from src.config import COLLAPSE_PRICE
         for city_key, cfg in WATCH_CITIES.items():
             token_ids = cfg.get("token_ids", {})
             if not token_ids:
@@ -164,8 +167,15 @@ def do_fetch_prices():
             if prices:
                 with lock:
                     state["poly_prices"][city_key] = prices
-                    # Also update mkt_prices in WATCH_CITIES for scoring
                     WATCH_CITIES[city_key]["mkt_prices"] = prices
+                    # Collapse guard: if ALL outcome prices are below threshold,
+                    # the market has resolved or is collapsing — block for today
+                    valid_prices = [p for p in prices.values() if p is not None]
+                    if valid_prices and max(valid_prices) < COLLAPSE_PRICE:
+                        if city_key not in state["collapsed_today"]:
+                            state["collapsed_today"].add(city_key)
+                            console.print(f"[yellow]⚠ {city_key}: market collapsed "
+                                          f"(max price {max(valid_prices):.3f}) — blocked for today[/]")
     finally:
         with lock: state["fetching"].discard("prices")
 
@@ -274,7 +284,13 @@ def do_run_signals():
                     pip_final = pip_validated.get("adjusted_pip", pip_raw)
 
             # Detect opportunity (recalculate edge with validated PIP)
-            opp = detect_opportunity(city_key, wcs_data, tps_data, pip_final)
+            opp = detect_opportunity(
+                city_key, wcs_data, tps_data, pip_final,
+                extra_state={
+                    "collapsed_today": state.get("collapsed_today", set()),
+                    "traded_today":    state.get("traded_today", set()),
+                }
+            )
 
             # Build signal dict for display and Telegram
             signal = {
@@ -307,16 +323,23 @@ def do_run_signals():
             pos = state["positions"].get(city_key)
             if pos and pos.status == "OPEN":
                 cur_price = state["poly_prices"].get(city_key, {}).get(pos.outcome_val)
-                monitor_position(city_key, pos, cur_price,
+                trade = monitor_position(city_key, pos, cur_price,
                                  wcs_data["score"], poly_client, state)
+                if trade:
+                    # Mark city as done for today — no re-entry
+                    from src.config import ONE_ENTRY_PER_DAY
+                    if ONE_ENTRY_PER_DAY:
+                        with lock: state["traded_today"].add(city_key)
                 continue
 
             # Open new position
             if opp and city_key not in state["positions"]:
-                open_position(
+                opened = open_position(
                     city_key, opp, state["capital_usdc"],
                     recent_trades, poly_client, state
                 )
+                # Don't mark traded_today here — only mark when closed
+                # so the position can still be monitored
 
         # Bootstrap CI
         current_count = len(recent_trades)
@@ -472,6 +495,13 @@ def main():
                 recent   = DB.load_recent_trades(limit=100)
                 today_ts = [t for t in recent if t["time"][:10] == today]
                 DB.save_daily_snapshot(state["capital_usdc"], today_ts)
+
+            # Reset daily guards at midnight ET
+            if now.hour == 0 and now.minute == 0:
+                with lock:
+                    state["collapsed_today"].clear()
+                    state["traded_today"].clear()
+                console.print("[dim]Daily guards reset[/]")
 
 
 if __name__ == "__main__":
