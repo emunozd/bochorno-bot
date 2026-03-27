@@ -281,6 +281,38 @@ def save_trade(trade) -> int:
         return cur.lastrowid
 
 
+def city_already_traded(city_key: str, window_hours: float) -> bool:
+    """
+    Returns True if there is an open position OR a closed trade for city_key
+    within the last `window_hours` hours.
+
+    Used to prevent re-entry during the same market cycle:
+      window = 24h - hours_remaining_until_market_close
+
+    Checks both tables:
+      - positions: open position exists right now
+      - trades: closed trade within the window
+    """
+    # Open position is always a block
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM positions WHERE city_key=? AND status='OPEN'",
+            (city_key,)
+        ).fetchone()
+    if row:
+        return True
+
+    # Closed trade within window
+    cutoff = (datetime.now(ET) -
+              __import__("datetime").timedelta(hours=window_hours)).isoformat()
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM trades WHERE city_key=? AND time >= ? LIMIT 1",
+            (city_key, cutoff)
+        ).fetchone()
+    return bool(row)
+
+
 def load_recent_trades(limit: int = 200) -> List[dict]:
     with _conn() as conn:
         rows = conn.execute(

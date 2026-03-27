@@ -97,8 +97,6 @@ NWP_FALLBACK_WEIGHTS = {
 WCS_MIN        = float(os.environ.get("WCS_MIN",    "65"))   # Weather Confidence Score
 EDGE_MIN       = float(os.environ.get("EDGE_MIN",   "0.08")) # min PIP - market_price
 MKT_PRICE_MIN      = float(os.environ.get("MKT_PRICE_MIN",  "0.02"))  # skip illiquid outcomes below this price
-COLLAPSE_PRICE     = float(os.environ.get("COLLAPSE_PRICE", "0.03"))  # market collapsed — block city for the day
-ONE_ENTRY_PER_DAY  = os.environ.get("ONE_ENTRY_PER_DAY", "true").lower() == "true"  # no re-entry same city same day
 SIGMA_MAX      = float(os.environ.get("SIGMA_MAX",  "3.0"))  # block if ensemble spread > this (°C/°F)
 
 # ── Risk management ────────────────────────────────────────────────────────

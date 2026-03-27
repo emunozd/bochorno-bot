@@ -301,8 +301,10 @@ def detect_opportunity(
         log.debug(f"{city_key}: blocked — {reason}")
         return None
     if wcs_data.get("score", 0) < WCS_MIN:
+        log.info(f"{city_key}: WCS {wcs_data.get('score',0):.1f} < WCS_MIN {WCS_MIN} — no signal")
         return None
     if not market_is_open(city_key):
+        log.info(f"{city_key}: market not open — no signal")
         return None
 
     # Guard 1: market collapsed today (price fell below COLLAPSE_PRICE)
@@ -323,11 +325,12 @@ def detect_opportunity(
         return None
 
     if mkt_price < MKT_PRICE_MIN:
-        log.debug(f"{city_key}: mkt_price {mkt_price:.4f} illiquid — skip")
+        log.info(f"{city_key}: mkt_price {mkt_price:.4f} < MKT_PRICE_MIN {MKT_PRICE_MIN} — illiquid")
         return None
 
     edge = round(pip_final - mkt_price, 4)
     if edge < EDGE_MIN:
+        log.info(f"{city_key}: edge {edge:.3f} < EDGE_MIN {EDGE_MIN} — skip")
         return None
 
     ev = expected_value(pip_final, mkt_price)
