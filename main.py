@@ -314,11 +314,29 @@ def do_run_signals():
                 continue
 
             # Open new position
+            # Double-check DB immediately before opening — guards against
+            # race conditions where detect_opportunity ran before the previous
+            # trade was committed to DB by another thread.
             if opp and city_key not in state["positions"]:
-                open_position(
-                    city_key, opp, state["capital_usdc"],
-                    recent_trades, poly_client, state
-                )
+                from src.data.database import city_already_traded as _cat
+                from src.config import WATCH_CITIES as _wc
+                _end_date   = _wc.get(city_key, {}).get("end_date", "")
+                _hours_left = 24.0
+                if _end_date:
+                    try:
+                        _end_dt     = datetime.fromisoformat(_end_date.replace("Z", "+00:00"))
+                        _mins_left  = (_end_dt - datetime.now(_end_dt.tzinfo)).total_seconds() / 60
+                        _hours_left = max(0.0, _mins_left / 60.0)
+                    except Exception:
+                        pass
+                _window = max(1.0, 24.0 - _hours_left)
+                if not _cat(city_key, _window):
+                    open_position(
+                        city_key, opp, state["capital_usdc"],
+                        recent_trades, poly_client, state
+                    )
+                else:
+                    log.info(f"{city_key}: DB guard blocked re-entry at open time")
 
         # Bootstrap CI
         current_count = len(recent_trades)
